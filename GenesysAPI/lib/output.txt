@@ -1,0 +1,14 @@
+ Volume in drive C is Windows
+ Volume Serial Number is FC88-3847
+
+ Directory of C:\projects\banco\banco_svn\GenesysAPI\lib
+
+[.]                              [..]
+commons-codec-1.9.jar            commons-logging-1.1.1.jar
+commons-logging.jar              httpclient-4.2.3.jar
+httpclient-cache-4.2.3.jar       httpcore-4.2.2.jar
+jackson-annotations-2.12.5.jar   jackson-core-2.12.5.jar
+jackson-databind-2.12.5.jar      jjwt-0.9.1.jar
+log4j-1.2.17.jar                 output.txt
+              12 File(s)      3,684,082 bytes
+               2 Dir(s)  200,006,184,960 bytes free
