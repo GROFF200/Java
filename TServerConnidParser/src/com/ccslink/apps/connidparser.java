@@ -1,0 +1,448 @@
+package com.ccslink.apps;
+
+import java.io.*;
+import java.util.*;
+import java.util.regex.*;
+
+
+public class connidparser {
+
+     private static ArrayList<String> fileNames = new ArrayList<String>();
+     private static ArrayList<String> events = new ArrayList<String>();
+     private static ArrayList<String> timeStamps = new ArrayList<String>();
+     private static String lastTimeStamp = null;
+     private static String outputFile = "report.html";
+     private static String outputSummaryFile = "reportsummary.html";
+
+     //These are used to build the final report
+     private static ArrayList<String> headers = new ArrayList<String>();
+     private static HashMap<String, ArrayList<String>> contents = new HashMap<String, ArrayList<String>>();
+     private static HashMap<String, String> headerIndex = new HashMap<String, String>();
+
+     public static void main(final String argv[]) {
+
+          try {
+               if (argv.length < 2) {
+                    System.out.println("USAGE:   connidparser <tserverDir> <connid>");
+		    System.exit(1);
+	       }
+	       String tserverDir = argv[0];
+	       String connid = argv[1];
+	       System.out.println("Opening files in "+tserverDir+".  Looking for connid "+connid);
+               readFiles(tserverDir, connid);
+	       System.out.println("Generating detailed call report (report.html)");
+	       generateReport();
+	       System.out.println("Generating call report summary (reportsummary.html)");
+	       generateSummaryReport();
+	       System.out.println("Finished!");
+	  } catch (Exception e) {
+               e.printStackTrace();
+	  }
+     }
+
+      private static void generateSummaryReport() {
+
+          try {
+	       headers.add("generic");
+               for (int x=0; x<events.size(); x++) {
+                    String eventStr = events.get(x);
+		    String eventName = getEventName(eventStr);
+		    String timeStamp = timeStamps.get(x);
+		    String ThisDN = getThisDN(eventStr);
+		    String ThisQueue = getThisQueue(eventStr);
+		    if (ThisDN != null && !headers.contains(ThisDN)) headers.add(ThisDN);
+		    if (ThisQueue != null && !headers.contains(ThisQueue)) headers.add(ThisQueue);
+		    if (ThisQueue != null) {
+                         ArrayList<String> events = contents.get(ThisQueue);
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put(ThisQueue, events);
+		    } else if (ThisDN != null) {
+                         ArrayList<String> events = contents.get(ThisDN);
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put(ThisDN, events);
+		    } else {
+                         ArrayList<String> events = contents.get("generic");
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put("generic", events);
+		    }
+		   // System.out.println("["+timeStamp+"]    "+eventName+"   ThisDN="+ThisDN+"  ThisQueue="+ThisQueue);
+	       }
+               PrintWriter fpw = new PrintWriter(new FileOutputStream(outputSummaryFile));
+	       fpw.println("<html><body>");
+	       fpw.println("<table border=1 cellspacing=5 cellpadding=3>");
+	       fpw.println("<tr>");
+	       fpw.println("<td bgcolor=\"yellow\"><b>Time</b></td>");
+               for (int x=0; x<headers.size(); x++) {
+		    String headerVal = headers.get(x);
+		    if (headerVal.equals("generic")) headerVal = "&nbsp;";
+                    fpw.println("<td bgcolor=\"yellow\"><b>"+headerVal+"</b></td>");
+		    headerIndex.put(headers.get(x), Integer.toString(x));
+	       }
+	       fpw.println("</tr>");
+	       ArrayList<String> modifiedEvents = new ArrayList<String>();
+	       ArrayList<String> modifiedTimeStamps = new ArrayList<String>();
+               //Let's trim this down to events that we care about and ditch the rest.  Then we'll
+	       //generate a smaller report.
+	       for (int x=0; x<events.size(); x++) {
+                    String eventStr = events.get(x);
+		    String eventName = getEventName(eventStr);
+		    if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") || eventName.equals("EventRouteRequest") ||
+                        eventName.equals("EventRouteUsed") || eventName.equals("EventHeld") || eventName.equals("EventRetrieved") || 
+			eventName.equals("EventEstablished") || eventName.equals("EventReleased") || eventName.equals("EventTreatmentApplied")
+			|| eventName.equals("EventTreatmentEnd") || eventName.equals("EventDiverted") || eventName.equals("EventQueued")
+			|| eventName.equals("EventRemoteConnectionSuccess") || eventName.equals("EventNetworkReached") || eventName.equals("EventAbandoned")) {
+                        modifiedEvents.add(eventStr);
+			String timeStamp = timeStamps.get(x);
+			modifiedTimeStamps.add(timeStamp);
+		   }
+	       }
+               for (int x=0; x<modifiedEvents.size(); x++) {
+                    String eventStr = modifiedEvents.get(x);
+		    String eventName = getEventName(eventStr);
+		    String timeStamp = modifiedTimeStamps.get(x);
+		    String ThisDN = getThisDN(eventStr);
+		    String ThisQueue = getThisQueue(eventStr); 
+		    String CollectedDigits = null;
+		    if (eventName.equals("EventTreatmentApplied")) {
+			    CollectedDigits = getCollectedDigits(eventStr);
+	            }
+		    fpw.println("<tr>");
+		    fpw.println("<td>");
+                    fpw.println(timeStamp);
+		    fpw.println("</td>");
+		    if (ThisDN != null) {
+                         String indexStr = headerIndex.get(ThisDN);
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+				   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased")
+				       || eventName.equals("EventTreatmentApplied") || eventName.equals("EventAbandoned"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName);
+				   if (CollectedDigits != null && CollectedDigits.length() > 0) fpw.println("&nbsp;*(CollectedDigits = "+CollectedDigits+")*");
+				   fpw.println("</a></b></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    } else if (ThisQueue != null) {
+                         String indexStr = headerIndex.get(ThisQueue);
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+                                   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased") 
+				       || eventName.equals("EventTreatmentApplied"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName);
+				   if (CollectedDigits != null && CollectedDigits.length() > 0) fpw.println("&nbsp;*(CollectedDigits = "+CollectedDigits+")*");
+				   fpw.println("</b></a></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    } else {
+                         String indexStr = headerIndex.get("generic");
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+                                   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased")
+				       || eventName.equals("EventTreatmentApplied") || eventName.equals("EventAbandoned"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName + "</b></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    }
+		    fpw.println("</tr>");
+	       }
+	       fpw.println("</table>");
+	       fpw.println("<br><br><br>");
+	       for (int x=0; x<modifiedEvents.size(); x++) {
+                    String eventStr = modifiedEvents.get(x);
+		    fpw.println("<hr>");
+		    fpw.println("<a name=\"event"+Integer.toString(x)+"\">");
+		    String eventInfo[] = eventStr.split("\n");
+		    for (int y=0; y<eventInfo.length; y++) {
+			 String eventLine = eventInfo[y];
+			 String modifiedEventLine = "";
+			 for (int z=0; z<eventLine.length(); z++) {
+                              if (eventLine.charAt(z) == '\t') modifiedEventLine += "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;";
+			      else modifiedEventLine += eventLine.charAt(z);
+			 }
+                         fpw.println(modifiedEventLine+"<br>");
+		    }
+	            fpw.println("</a><br>");
+		    fpw.println("<hr>");
+	       }
+	       fpw.println("</body></html>");
+	       fpw.close();
+	  } catch (Exception e) { e.printStackTrace(); }
+     }
+
+     private static void generateReport() {
+
+          try {
+	       headers.add("generic");
+               for (int x=0; x<events.size(); x++) {
+                    String eventStr = events.get(x);
+		    String eventName = getEventName(eventStr);
+		    String timeStamp = timeStamps.get(x);
+		    String ThisDN = getThisDN(eventStr);
+		    String ThisQueue = getThisQueue(eventStr);
+		    if (ThisDN != null && !headers.contains(ThisDN)) headers.add(ThisDN);
+		    if (ThisQueue != null && !headers.contains(ThisQueue)) headers.add(ThisQueue);
+		    if (ThisQueue != null) {
+                         ArrayList<String> events = contents.get(ThisQueue);
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put(ThisQueue, events);
+		    } else if (ThisDN != null) {
+                         ArrayList<String> events = contents.get(ThisDN);
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put(ThisDN, events);
+		    } else {
+                         ArrayList<String> events = contents.get("generic");
+			 if (events == null) events = new ArrayList<String>();
+			 events.add(eventStr);
+			 contents.put("generic", events);
+		    }
+		   // System.out.println("["+timeStamp+"]    "+eventName+"   ThisDN="+ThisDN+"  ThisQueue="+ThisQueue);
+	       }
+               PrintWriter fpw = new PrintWriter(new FileOutputStream(outputFile));
+	       fpw.println("<html><body>");
+	       fpw.println("<table border=1 cellspacing=5 cellpadding=3>");
+	       fpw.println("<tr>");
+	       fpw.println("<td bgcolor=\"yellow\"><b>Time</b></td>");
+               for (int x=0; x<headers.size(); x++) {
+		    String headerVal = headers.get(x);
+		    if (headerVal.equals("generic")) headerVal = "&nbsp;";
+                    fpw.println("<td bgcolor=\"yellow\"><b>"+headerVal+"</b></td>");
+		    headerIndex.put(headers.get(x), Integer.toString(x));
+	       }
+	       fpw.println("</tr>");
+               for (int x=0; x<events.size(); x++) {
+                    String eventStr = events.get(x);
+		    String eventName = getEventName(eventStr);
+		    String timeStamp = timeStamps.get(x);
+		    String ThisDN = getThisDN(eventStr);
+		    String ThisQueue = getThisQueue(eventStr); 
+		    String CollectedDigits = null;
+		    if (eventName.equals("EventTreatmentApplied")) {
+			    CollectedDigits = getCollectedDigits(eventStr);
+	            }
+		    fpw.println("<tr>");
+		    fpw.println("<td>");
+                    fpw.println(timeStamp);
+		    fpw.println("</td>");
+		    if (ThisDN != null) {
+                         String indexStr = headerIndex.get(ThisDN);
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+				   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased")
+				       || eventName.equals("EventTreatmentApplied"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName);
+				   if (CollectedDigits != null && CollectedDigits.length() > 0) fpw.println("&nbsp;*(CollectedDigits = "+CollectedDigits+")*");
+				   fpw.println("</a></b></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    } else if (ThisQueue != null) {
+                         String indexStr = headerIndex.get(ThisQueue);
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+                                   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased") 
+				       || eventName.equals("EventTreatmentApplied"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName);
+				   if (CollectedDigits != null && CollectedDigits.length() > 0) fpw.println("&nbsp;*(CollectedDigits = "+CollectedDigits+")*");
+				   fpw.println("</b></a></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    } else {
+                         String indexStr = headerIndex.get("generic");
+			 for (int y=0; y<headers.size(); y++) {
+                              if (y == Integer.parseInt(indexStr)) {
+                                   if (eventName.equals("EventCallCreated") || eventName.equals("EventDialing") ||
+				       eventName.equals("EventRinging") || eventName.equals("EventEstablished") ||
+				       eventName.equals("EventQueued") || eventName.equals("EventReleased")
+				       || eventName.equals("EventTreatmentApplied") || eventName.equals("EventAbandoned"))
+			           fpw.println("<td bgcolor=\"green\">");
+                                   else fpw.println("<td>");
+				   fpw.println("<b><a href=\"#event"+Integer.toString(x)+"\">" + eventName + "</b></td>");
+			      } else fpw.println("<td>&nbsp;</td>");
+			 }
+		    }
+		    fpw.println("</tr>");
+	       }
+	       fpw.println("</table>");
+	       fpw.println("<br><br><br>");
+	       for (int x=0; x<events.size(); x++) {
+                    String eventStr = events.get(x);
+		    fpw.println("<hr>");
+		    fpw.println("<a name=\"event"+Integer.toString(x)+"\">");
+		    String eventInfo[] = eventStr.split("\n");
+		    for (int y=0; y<eventInfo.length; y++) {
+			 String eventLine = eventInfo[y];
+			 String modifiedEventLine = "";
+			 for (int z=0; z<eventLine.length(); z++) {
+                              if (eventLine.charAt(z) == '\t') modifiedEventLine += "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;";
+			      else modifiedEventLine += eventLine.charAt(z);
+			 }
+                         fpw.println(modifiedEventLine+"<br>");
+		    }
+	            fpw.println("</a><br>");
+		    fpw.println("<hr>");
+	       }
+	       fpw.println("</body></html>");
+	       fpw.close();
+	  } catch (Exception e) { e.printStackTrace(); }
+     }
+
+     private static String getCollectedDigits(String eventStr) {
+
+          try {
+               String eventInfo[] = eventStr.split("\n");
+	       for (int x=0; x<eventInfo.length; x++) {
+                    String eventLine = eventInfo[x];
+		    if (eventLine.indexOf("zz_CollectedDigits") != -1) {
+                         String lineInfo[] = eventLine.split("\t");
+			 String CollectedDigit = lineInfo[lineInfo.length - 1];
+			 CollectedDigit = CollectedDigit.replaceAll("'", "");
+			 return CollectedDigit;
+		    }
+	       }
+	  } catch (Exception e) { e.printStackTrace(); }
+	  return null;
+     }
+     private static String getThisQueue(String eventStr) {
+
+          try {
+               String eventInfo[] = eventStr.split("\n");
+	       for (int x=0; x<eventInfo.length; x++) {
+                    String eventLine = eventInfo[x];
+		    if (eventLine.indexOf("AttributeThisQueue") != -1) {
+                         String lineInfo[] = eventLine.split("\t");
+			 String QueueVal = lineInfo[lineInfo.length - 1];
+			 return QueueVal;
+		    }
+	       }
+	  } catch (Exception e) { e.printStackTrace(); }
+	  return null;
+     }
+
+     private static String getThisDN(String eventStr) {
+     
+          try {
+               String eventInfo[] = eventStr.split("\n");
+	       for (int x=0; x<eventInfo.length; x++) {
+                    String eventLine = eventInfo[x];
+		    if (eventLine.indexOf("AttributeThisDN") != -1 && eventLine.indexOf("AttributeThisDNRole") == -1) {
+                         String lineInfo[] = eventLine.split("\t");
+			 String DNVal = lineInfo[lineInfo.length - 1];
+			 return DNVal;
+		    }
+	       }
+	  } catch (Exception e) { e.printStackTrace(); }
+	  return null;
+     }
+
+     private static String getEventName(String eventStr) {
+
+          try {
+               String eventInfo[] = eventStr.split("\n");
+	       String firstLine = eventInfo[0];
+	       String lineInfo[] = firstLine.split(" ");
+	       String eventName = lineInfo[lineInfo.length - 1];
+	       return eventName;
+	  } catch (Exception e) { e.printStackTrace(); }
+	  return null;
+     }
+
+     private static void readFiles(String fileDir, String connid) {
+
+          try {
+               File dirList = new File(fileDir);
+               String list[] = dirList.list();
+               if (list == null) {
+                    System.out.println("No files are present in "+fileDir);
+                    return;
+               }
+               for (int x=0; x<list.length; x++) {
+                    String fileName = list[x];
+                    if (fileName.indexOf(".swp") == -1) {
+                         System.out.println("Reading file "+dirList+"\\"+fileName);
+                         BufferedReader fin = new BufferedReader(new FileReader(fileDir + "\\" + fileName));
+                         String temp = "";
+			 boolean startEvent = false;
+			 boolean endEvent = false;
+			 StringBuffer eventDetails = new StringBuffer();
+                         while ((temp = fin.readLine()) != null) {
+                              //First identify the start of an event
+			      if (startEvent && (temp.indexOf("sent to") != -1 || temp.indexOf("received from")!= -1 || temp.indexOf("send_to") != -1 || temp.indexOf("Send to") != -1 || temp.indexOf("distribute call/party") != -1 || temp.indexOf("distribute_event") != -1) || temp.indexOf("distribute_response")!= -1 || temp.indexOf("distribute_user_event")!= -1 || temp.indexOf("send_to_client") != -1) {
+				      //System.out.println("*** End of one event, start of another.");
+				      //if (System.out.println("Captured event:\n ======================\n"+eventDetails.toString()+ "\n ======================\n");
+				      String eventStr = eventDetails.toString();
+				      if (connidPresent(eventStr, connid)) {
+					   //System.out.println("*** Adding event: "+eventStr);
+                                           events.add(eventStr);
+					   fileNames.add(fileName);
+					   timeStamps.add(lastTimeStamp);
+				      } 
+				      startEvent = false;
+				      endEvent = true;
+			      }
+			      if (temp.indexOf("sent to") != -1 || temp.indexOf("received from") != -1 || temp.indexOf("send_to") != -1 || temp.indexOf("Send to") !=-1 || temp.indexOf("distribute call/party") != -1 || temp.indexOf("distribute_event") != -1 || temp.indexOf("distribute_response")!= -1 || temp.indexOf("distribute_user_event") != -1 || temp.indexOf("send_to_client") != -1) {
+				   //Need some exclusionary rules as this can pick up ISCC SIP events too
+				   if (temp.indexOf("[ISCC]") == -1 && temp.indexOf(" Trc ") == -1) {
+                                        //System.out.println("*** Start of event denoted by: "+temp);
+				        startEvent = true;
+				        endEvent = false;
+				        eventDetails = null;
+				       eventDetails = new StringBuffer();
+				   }
+			      }
+			      if (startEvent && !endEvent) {
+				   if (temp.indexOf("[BSYNC]") == -1 && temp.indexOf("[gctm]") == -1 && temp.indexOf("[cm]") == -1 && temp.indexOf("[gctmi]") == -1 && temp.indexOf("[ISCC]") == -1 && temp.indexOf("[sm]") == -1 && temp.indexOf("[sm<<]") == -1 && temp.indexOf("CiscoCause") == -1 && temp.indexOf("@Windstream-SIP-") == -1 && temp.indexOf("[**1]") == -1 && temp.indexOf("[((1]") == -1) {
+                                        //System.out.println("*** Event line: "+temp);
+				        eventDetails.append(temp + "\n");
+			           }
+			      }
+			      Pattern p = Pattern.compile("\\d\\d:\\d\\d:\\d\\d");
+			      Matcher m = p.matcher(temp);
+			      while (m.find()) {
+                                   lastTimeStamp = m.group(0);
+			      }
+                         }
+                         fin.close();
+                    }
+               }
+          } catch (Exception e) { e.printStackTrace(); }
+     }
+
+     private static boolean connidPresent(String event, String connid) {
+
+          try {
+               String eventInfo[] = event.split("\n");
+	       for (int x=0; x<eventInfo.length; x++) {
+                    String line = eventInfo[x];
+		    if (line.indexOf("AttributeConnID") != -1) {
+                         String lineInfo[] = line.split("\t");
+			 String checkConnid = lineInfo[lineInfo.length - 1];
+			 if (connid.equals(checkConnid)) return true;
+		    }
+	       }
+	  } catch (Exception e) { e.printStackTrace(); }
+	  return false;
+     }
+}
